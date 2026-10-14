@@ -20,7 +20,7 @@ func LoadConfig() (*Config, error) {
 
 	// 2. Загружаем файл по вытащенному пути
 	// Теперь если файла нет — мы честно возвращаем ошибку наружу, а не игнорируем её через "_"
-	err := godotenv.Load(*configPath)
+	err := godotenv.Overload(*configPath)
 	if err != nil {
 		return nil, err
 	}
