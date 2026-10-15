@@ -19,7 +19,6 @@ type App struct {
 	httpServer *http.Server
 }
 
-// NewApp инициализирует все слои приложения, базы данных и воркеров
 func NewApp() (*App, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
