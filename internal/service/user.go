@@ -2,7 +2,6 @@ package service
 
 import "errors"
 
-// UserRepository описывает контракт для работы с базой данных
 type UserRepository interface {
 	GetByID(id int) (string, bool, error)
 }

@@ -21,13 +21,11 @@ type App struct {
 
 // NewApp инициализирует все слои приложения, базы данных и воркеров
 func NewApp() (*App, error) {
-	// 1. Загружаем конфиг
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("config error: %w", err)
 	}
 
-	// 2. Инициализируем БД
 	db, err := sql.Open("pgx", cfg.DBString)
 	if err != nil {
 		return nil, fmt.Errorf("db open error: %w", err)
@@ -38,15 +36,12 @@ func NewApp() (*App, error) {
 		return nil, fmt.Errorf("db ping error: %w", err)
 	}
 
-	// 3. Собираем зависимости конвейера (DI)
 	repo := repository.NewPostgresRepository(db)
 	userService := service.NewUserService(repo)
 	handler := userHTTP.NewUserHandler(userService)
 
-	// 4. Собираем роуты
 	router := userHTTP.InitRoutes(handler)
 
-	// 5. Настраиваем сам HTTP-сервер
 	serverAddr := fmt.Sprintf(":%s", cfg.ServerPort)
 	httpServer := &http.Server{
 		Addr:    serverAddr,
@@ -60,13 +55,11 @@ func NewApp() (*App, error) {
 	}, nil
 }
 
-// Run запускает скомпилированное приложение
 func (a *App) Run() error {
 	log.Printf("[START] Микросервис запущен на порту %s", a.cfg.ServerPort)
 	return a.httpServer.ListenAndServe()
 }
 
-// Close безопасно закрывает критические ресурсы при остановке
 func (a *App) Close() {
 	if a.db != nil {
 		_ = a.db.Close()

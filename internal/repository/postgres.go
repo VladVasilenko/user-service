@@ -8,7 +8,6 @@ type PostgresRepository struct {
 	db *sql.DB
 }
 
-// Имя функции ДОЛЖНО быть с большой буквы New...
 func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{
 		db: db,
