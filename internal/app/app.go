@@ -1,10 +1,17 @@
 package app
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
 	"user-service/internal/config"
 	"user-service/internal/repository"
 	"user-service/internal/service"
@@ -30,7 +37,15 @@ func NewApp() (*App, error) {
 		return nil, fmt.Errorf("db open error: %w", err)
 	}
 
-	if err := db.Ping(); err != nil {
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(1 * time.Minute)
+
+	pingCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := db.PingContext(pingCtx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("db ping error: %w", err)
 	}
@@ -39,12 +54,16 @@ func NewApp() (*App, error) {
 	userService := service.NewUserService(repo)
 	handler := userHTTP.NewUserHandler(userService)
 
-	router := userHTTP.InitRoutes(handler)
+	router := userHTTP.InitRoutes(userHTTP.Handlers{User: handler}, db)
 
 	serverAddr := fmt.Sprintf(":%s", cfg.ServerPort)
 	httpServer := &http.Server{
-		Addr:    serverAddr,
-		Handler: router,
+		Addr:              serverAddr,
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	return &App{
@@ -55,13 +74,43 @@ func NewApp() (*App, error) {
 }
 
 func (a *App) Run() error {
-	log.Printf("[START] Микросервис запущен на порту %s", a.cfg.ServerPort)
-	return a.httpServer.ListenAndServe()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+
+	go func() {
+		log.Printf("[START] Микросервис запущен на порту %s", a.cfg.ServerPort)
+		if err := a.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case err := <-errCh:
+		return fmt.Errorf("http server error: %w", err)
+	case <-ctx.Done():
+		log.Println("[SHUTDOWN] Получен сигнал завершения, начинаем graceful shutdown")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := a.httpServer.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("http server shutdown error: %w", err)
+	}
+
+	log.Println("[SHUTDOWN] HTTP-сервер остановлен")
+	return nil
 }
 
 func (a *App) Close() {
-	if a.db != nil {
-		_ = a.db.Close()
-		log.Println("[SHUTDOWN] Соединение с базой данных закрыто")
+	if a.db == nil {
+		return
 	}
+	if err := a.db.Close(); err != nil {
+		log.Printf("[SHUTDOWN] Ошибка закрытия БД: %v", err)
+		return
+	}
+	log.Println("[SHUTDOWN] Соединение с базой данных закрыто")
 }

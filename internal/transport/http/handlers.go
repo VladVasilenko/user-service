@@ -1,42 +1,72 @@
 package http
 
 import (
-	"fmt"
+	"context"
+	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"strconv"
+
+	"user-service/internal/model"
 	"user-service/internal/service"
 )
 
+type UserService interface {
+	GetUserProfile(ctx context.Context, id int64) (*model.User, error)
+}
+
 type UserHandler struct {
-	userService *service.UserService // Теперь зависим строго от слоя логики
+	userService UserService
 }
 
-// Конструктор теперь принимает указатель на сервис
-func NewUserHandler(s *service.UserService) *UserHandler {
-	return &UserHandler{
-		userService: s,
-	}
+func NewUserHandler(s UserService) *UserHandler {
+	return &UserHandler{userService: s}
 }
 
-func (h *UserHandler) GetPlayer(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.URL.Query().Get("id"))
+type userResponse struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+func (h *UserHandler) GetUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid id"})
 		return
 	}
 
-	// Запрашиваем профиль у сервиса, а не у репозитория напрямую
-	name, err := h.userService.GetUserProfile(id)
+	user, err := h.userService.GetUserProfile(ctx, id)
 	if err != nil {
-		// Проверяем текст ошибки, которую вернул сервис
-		if err.Error() == "пользователь не найден" {
-			w.WriteHeader(http.StatusNotFound)
-			return
+		switch {
+		case errors.Is(err, service.ErrInvalidID):
+			writeJSON(w, http.StatusBadRequest, errorResponse{Error: "invalid id"})
+		case errors.Is(err, service.ErrUserNotFound):
+			writeJSON(w, http.StatusNotFound, errorResponse{Error: "user not found"})
+		default:
+			log.Printf("get user profile: %v", err)
+			writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal error"})
 		}
-		// Любая другая системная ошибка (например, упала БД)
-		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	_, _ = fmt.Fprintf(w, "Привет, %s\n", name)
+	writeJSON(w, http.StatusOK, userResponse{
+		ID:   user.ID,
+		Name: user.Name,
+	})
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("encode response: %v", err)
+	}
 }

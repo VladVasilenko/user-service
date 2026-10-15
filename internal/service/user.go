@@ -1,37 +1,43 @@
 package service
 
-import "errors"
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"user-service/internal/model"
+	"user-service/internal/repository"
+)
+
+var (
+	ErrInvalidID    = errors.New("invalid user id")
+	ErrUserNotFound = errors.New("user not found")
+)
 
 type UserRepository interface {
-	GetByID(id int) (string, bool, error)
+	GetByID(ctx context.Context, id int64) (*model.User, error)
 }
 
 type UserService struct {
 	repo UserRepository
 }
 
-// NewUserService — конструктор сервиса
 func NewUserService(r UserRepository) *UserService {
-	return &UserService{
-		repo: r,
-	}
+	return &UserService{repo: r}
 }
 
-// GetUserProfile — метод, где будет жить чистая бизнес-логика
-func (s *UserService) GetUserProfile(id int) (string, error) {
+func (s *UserService) GetUserProfile(ctx context.Context, id int64) (*model.User, error) {
 	if id <= 0 {
-		return "", errors.New("невалидный ID пользователя")
+		return nil, ErrInvalidID
 	}
 
-	name, exists, err := s.repo.GetByID(id)
+	u, err := s.repo.GetByID(ctx, id)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, ErrUserNotFound
+	}
 	if err != nil {
-		return "", err
-	}
-	if !exists {
-		return "", errors.New("пользователь не найден")
+		return nil, fmt.Errorf("get user %d: %w", id, err)
 	}
 
-	// Здесь в будущем можно добавить проверки: забанен ли юзер,
-	// залогинен ли, отформатировать его имя и т.д.
-	return name, nil
+	return u, nil
 }

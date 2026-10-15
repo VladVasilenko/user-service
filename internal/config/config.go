@@ -1,8 +1,10 @@
 package config
 
 import (
-	"flag"
+	"errors"
+	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -10,27 +12,43 @@ import (
 type Config struct {
 	ServerPort string
 	DBString   string
-	TgToken    string
 }
 
 func LoadConfig() (*Config, error) {
-	configPath := flag.String("config", ".env", "Путь к файлу конфигурации .env")
-	flag.Parse() // Парсим флаги, переданные в терминале
+	// .env опционален: в проде переменные уже в окружении
+	_ = godotenv.Load(".env")
 
-	err := godotenv.Overload(*configPath)
-	if err != nil {
+	cfg := &Config{
+		ServerPort: getEnv("SERVER_PORT", "8080"),
+		DBString:   os.Getenv("DB_DSN"),
+	}
+
+	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 
-	cfg := &Config{
-		ServerPort: os.Getenv("SERVER_PORT"),
-		DBString:   os.Getenv("DB_DSN"),
-		TgToken:    os.Getenv("TG_BOT_TOKEN"),
-	}
-
-	if cfg.ServerPort == "" {
-		cfg.ServerPort = "8080"
-	}
-
 	return cfg, nil
+}
+
+func (c *Config) validate() error {
+	if c.DBString == "" {
+		return errors.New("DB_DSN is required")
+	}
+
+	port, err := strconv.Atoi(c.ServerPort)
+	if err != nil {
+		return fmt.Errorf("SERVER_PORT must be a number: %w", err)
+	}
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("SERVER_PORT out of range: %d", port)
+	}
+
+	return nil
+}
+
+func getEnv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
